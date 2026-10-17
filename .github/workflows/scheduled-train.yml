@@ -1,0 +1,48 @@
+name: ZBorsa Scheduled Pipeline Runner
+
+# Runs on GitHub's 100% Free Public Runners (Unlimited Minutes)
+# Ephemerally pulls the private training engine into isolated runner RAM,
+# trains for 3-4 hours continuously, publishes champion to Cloudflare/Supabase, and terminates.
+
+on:
+  schedule:
+    # Runs every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: 'Continuous training duration in minutes (up to 300 min)'
+        required: false
+        default: '180'
+
+jobs:
+  cloud-auto-train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # 6 hours max on public runners
+
+    steps:
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ephemeral Clone of Private Trainer (RAM Disk)
+        env:
+          PRIVATE_PAT: ${{ secrets.PRIVATE_TRAINER_PAT }}
+        run: |
+          echo "=========================================================="
+          echo "🔒 Authenticating with private engine core..."
+          echo "=========================================================="
+          git clone --depth 1 https://${PRIVATE_PAT}@github.com/ziadallam/zborsa-private-trainer.git engine-core
+          cd engine-core
+          echo "📦 Installing quant dependencies..."
+          npm ci || npm install
+          echo "⚡ Launching continuous multi-hour training pipeline..."
+          CONTINUOUS_MINUTES=${{ github.event.inputs.duration_minutes || '180' }} npx tsx scripts/cloud-auto-train.ts
+          echo "✅ Continuous training completed successfully."
+
+      - name: Ephemeral Cleanup
+        if: always()
+        run: |
+          rm -rf engine-core
+          echo "🧹 Private code securely wiped from runner disk."
